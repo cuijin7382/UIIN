@@ -1,1 +1,1 @@
-The output of datasets will be updataed soon
+The outputs of datasets will be updataed soon
