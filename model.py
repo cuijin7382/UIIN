@@ -5,6 +5,7 @@ import time
 from einops import rearrange
 # from HVI_transformer import RGB_HVI
 import random
+from measure import metrics
 import matplotlib.pyplot as plt
 import cv2
 from loss import LossFunction
@@ -29,6 +30,55 @@ from tensorboardX import SummaryWriter
 import math
 from scipy.stats import wasserstein_distance
 import torchvision.transforms as transforms
+
+
+#
+# from skimage.metrics import peak_signal_noise_ratio, structural_similarity
+# import lpips
+# from DISTS_pytorch import DISTS
+# import time
+# import random
+# import matplotlib.pyplot as plt
+# import cv2
+# from IQA_pytorch import SSIM
+# from .loss import LossFunction
+# import os
+# from einops import rearrange
+#
+# from .bsnDBSNl import DBSNl
+# # from LLCaps import LLCaps,CWA
+# from . import util2
+# from timm.models.layers import trunc_normal_
+# from .blocks import CBlock_ln, SwinTransformerBlock
+# from .global_net import Global_pred
+# from PIL import Image
+# import torch
+# from .logger import Logger
+# import torch.nn as nn
+# import torch.nn.functional as F
+# import torch.optim as optim
+# from torch.autograd import Variable
+# import numpy as np
+# # from pytorch_msssim import ssim, ms_ssim
+# from complexPyTorch.complexLayers import ComplexConv2d, complex_relu
+# from tensorboardX import SummaryWriter
+# import math
+# from scipy.stats import wasserstein_distance
+# import torchvision.transforms as transforms
+def np2tensor(n:np.array):
+    '''
+    transform numpy array (image) to torch Tensor
+    BGR -> RGB
+    (h,w,c) -> (c,h,w)
+    '''
+    # gray
+    if len(n.shape) == 2:
+        return torch.from_numpy(np.ascontiguousarray(np.transpose(n, (2,0,1))))
+    # RGB -> BGR
+    elif len(n.shape) == 3:
+        return torch.from_numpy(np.ascontiguousarray(np.transpose(np.flip(n, axis=2), (2,0,1))))
+    else:
+        raise RuntimeError('wrong numpy dimensions : %s'%(n.shape,))
 def lpips2(img1, img2):
     '''
     image value range : [0 - 255]
@@ -38,7 +88,7 @@ def lpips2(img1, img2):
 
     device = torch.device("cuda:0")
 
-    lpips_model = lpips.LPIPS(net="vgg").to(device)#alex
+    lpips_model = lpips.LPIPS(net="alex").to(device)#alex
     # numpt to tensor
     preprocess = transforms.Compose([
         transforms.Resize((256, 256)),
@@ -46,15 +96,16 @@ def lpips2(img1, img2):
     ])
 
 
-    img1 = img1.transpose(1, 2, 0)
+    # img1 = img1.transpose(1, 2, 0)
+    # print(img1.shape) (600, 3, 400)
+    img1 = np2tensor(img1).to(device)
+    img2 = np2tensor(img2).to(device)
+    # print(img1.shape) torch.Size([400, 600, 3])
 
-    img1 = Image.fromarray(np.uint8(img1))
-    img2 = Image.fromarray(np.uint8(img2))
-
-
-
-    img1 = preprocess(img1).unsqueeze(0).to(device)
-    img2 = preprocess(img2).unsqueeze(0).to(device)
+    # img1 = Image.fromarray(np.uint8(img1))
+    # img2 = Image.fromarray(np.uint8(img2))
+    # img1 = preprocess(img1).unsqueeze(0).to(device)
+    # img2 = preprocess(img2).unsqueeze(0).to(device)
 
     distance = lpips_model(img1, img2)
     return distance.item()
@@ -87,6 +138,7 @@ def dists2(img1, img2):
     dists_value = D(img1, img2)
 
     return dists_value.item()
+
 
 def ssim2(img1, img2):
     '''
@@ -249,47 +301,6 @@ def frequency_loss(im1, im2):
 #     loss = torch.mean((instance_norm(img_fea) - instance_norm(target_fea)) ** 2)
 #
 #     return loss
-class CalibrateNetwork(nn.Module):
-    def __init__(self, layers, channels):
-        super(CalibrateNetwork, self).__init__()
-        kernel_size = 3
-        dilation = 1
-        padding = int((kernel_size - 1) / 2) * dilation
-        self.layers = layers
-
-        self.in_conv = nn.Sequential(
-            nn.Conv2d(in_channels=3, out_channels=channels, kernel_size=kernel_size, stride=1, padding=padding),
-            nn.BatchNorm2d(channels),
-            nn.ReLU()
-        )
-
-        self.convs = nn.Sequential(
-            nn.Conv2d(in_channels=channels, out_channels=channels, kernel_size=kernel_size, stride=1, padding=padding),
-            nn.BatchNorm2d(channels),
-            nn.ReLU(),
-            nn.Conv2d(in_channels=channels, out_channels=channels, kernel_size=kernel_size, stride=1, padding=padding),
-            nn.BatchNorm2d(channels),
-            nn.ReLU()
-        )
-        self.blocks = nn.ModuleList()
-        for i in range(layers):
-            self.blocks.append(self.convs)
-
-        self.out_conv = nn.Sequential(
-            nn.Conv2d(in_channels=channels, out_channels=3, kernel_size=3, stride=1, padding=1),
-            nn.Sigmoid()
-        )
-
-    def forward(self, input):
-        fea = self.in_conv(input)
-        for conv in self.blocks:
-            fea = fea + conv(fea)
-
-        fea = self.out_conv(fea)
-        delta = input - fea
-
-        return delta
-# #矫正 改进↓
 # class CalibrateNetwork(nn.Module):
 #     def __init__(self, layers, channels):
 #         super(CalibrateNetwork, self).__init__()
@@ -297,13 +308,12 @@ class CalibrateNetwork(nn.Module):
 #         dilation = 1
 #         padding = int((kernel_size - 1) / 2) * dilation
 #         self.layers = layers
-#         self.atten= IGAB(
-#                     dim=channels, num_blocks=2, dim_head=channels, heads=1)
+#
 #         self.in_conv = nn.Sequential(
 #             nn.Conv2d(in_channels=3, out_channels=channels, kernel_size=kernel_size, stride=1, padding=padding),
 #             nn.BatchNorm2d(channels),
 #             nn.ReLU()
-#         ) #最初处理 残差
+#         )
 #
 #         self.convs = nn.Sequential(
 #             nn.Conv2d(in_channels=channels, out_channels=channels, kernel_size=kernel_size, stride=1, padding=padding),
@@ -312,31 +322,73 @@ class CalibrateNetwork(nn.Module):
 #             nn.Conv2d(in_channels=channels, out_channels=channels, kernel_size=kernel_size, stride=1, padding=padding),
 #             nn.BatchNorm2d(channels),
 #             nn.ReLU()
-#         ) #循环 加残差
+#         )
 #         self.blocks = nn.ModuleList()
 #         for i in range(layers):
 #             self.blocks.append(self.convs)
 #
 #         self.out_conv = nn.Sequential(
-#             nn.Conv2d(in_channels=channels*2, out_channels=channels, kernel_size=3, stride=1, padding=1),
 #             nn.Conv2d(in_channels=channels, out_channels=3, kernel_size=3, stride=1, padding=1),
 #             nn.Sigmoid()
 #         )
-#         # self.cou= nn.Conv2d(in_channels=6, out_channels=3, kernel_size=1, stride=1, padding=1)
 #
-#     def forward(self, input,illu_fea):
+#     def forward(self, input):
 #         fea = self.in_conv(input)
-#         attfea=self.atten(fea,illu_fea)
-#
 #         for conv in self.blocks:
-#             fea=conv(fea)
 #             fea = fea + conv(fea)
-#         catfea=torch.cat([fea,attfea],dim=1)
-#         fea = self.out_conv(catfea)
+#
+#         fea = self.out_conv(fea)
 #         delta = input - fea
-#         # d2=input+attfea#这 是干啥 矫正的？
-#         # delta=fea
+#
 #         return delta
+# #矫正 改进↓
+class CalibrateNetwork(nn.Module):
+    def __init__(self, layers, channels):
+        super(CalibrateNetwork, self).__init__()
+        kernel_size = 3
+        dilation = 1
+        padding = int((kernel_size - 1) / 2) * dilation
+        self.layers = layers
+        self.atten= IGAB(
+                    dim=channels, num_blocks=2, dim_head=channels, heads=1)
+        self.in_conv = nn.Sequential(
+            nn.Conv2d(in_channels=3, out_channels=channels, kernel_size=kernel_size, stride=1, padding=padding),
+            nn.BatchNorm2d(channels),
+            nn.ReLU()
+        ) #最初处理 残差
+
+        self.convs = nn.Sequential(
+            nn.Conv2d(in_channels=channels, out_channels=channels, kernel_size=kernel_size, stride=1, padding=padding),
+            nn.BatchNorm2d(channels),
+            nn.ReLU(),
+            nn.Conv2d(in_channels=channels, out_channels=channels, kernel_size=kernel_size, stride=1, padding=padding),
+            nn.BatchNorm2d(channels),
+            nn.ReLU()
+        ) #循环 加残差
+        self.blocks = nn.ModuleList()
+        for i in range(layers):
+            self.blocks.append(self.convs)
+
+        self.out_conv = nn.Sequential(
+            nn.Conv2d(in_channels=channels*2, out_channels=channels, kernel_size=3, stride=1, padding=1),
+            nn.Conv2d(in_channels=channels, out_channels=3, kernel_size=3, stride=1, padding=1),
+            nn.Sigmoid()
+        )
+        # self.cou= nn.Conv2d(in_channels=6, out_channels=3, kernel_size=1, stride=1, padding=1)
+
+    def forward(self, input,illu_fea):
+        fea = self.in_conv(input)
+        attfea=self.atten(fea,illu_fea)
+
+        for conv in self.blocks:
+            fea=conv(fea)
+            fea = fea + conv(fea)
+        catfea=torch.cat([fea,attfea],dim=1)
+        fea = self.out_conv(catfea)
+        delta = input - fea
+        # d2=input+attfea#这 是干啥 矫正的？
+        # delta=fea
+        return delta
 # class ResidualModule0(nn.Module):
 #     def __init__(self, channel=64, kernel_size=3):
 #         super(ResidualModule0, self).__init__()
@@ -672,7 +724,7 @@ class Illumination_Estimator(nn.Module):  # 视网膜电流发生器采用了所
         self.depth_conv = nn.Conv2d(
             n_fea_middle, n_fea_middle, kernel_size=5, padding=2, bias=True, groups=n_fea_in)
         self.depth_conv3 = nn.Conv2d(
-            n_fea_middle, n_fea_middle, kernel_size=3, padding=2, bias=True, groups=n_fea_in)
+            n_fea_middle, n_fea_middle, kernel_size=3, padding=1, bias=True, groups=n_fea_in)
         self.conv3 = nn.Conv2d(n_fea_middle*2, n_fea_middle, kernel_size=1, bias=True)
         self.conv2 = nn.Conv2d(n_fea_middle, n_fea_out, kernel_size=1, bias=True)
 
@@ -689,7 +741,7 @@ class Illumination_Estimator(nn.Module):  # 视网膜电流发生器采用了所
         # input=img
         x_1 = self.conv1(input)
         illu_fea1 = self.depth_conv(x_1)
-        illu_fea2= self.depth_conv(x_1)
+        illu_fea2= self.depth_conv3(x_1)
         illu_fea3=torch.cat([illu_fea1,illu_fea2],dim=1)
         illu_fea = self.conv3(illu_fea3)# 特征
         illu_map = self.conv2(illu_fea)  # 亮度映射直接乘原图能得到亮图
@@ -828,15 +880,19 @@ class IG_MSA(nn.Module): #MSA使用ORF捕获的照明表示来指导自注意的
         """
         b, h, w, c = x_in.shape
         x = x_in.reshape(b, h * w, c)
-        q_inp = self.to_q(x)
+        q_inp = self.to_q(x) #torch.Size([1, 240000, 36]
         k_inp = self.to_k(x)
         v_inp = self.to_v(x)
         illu_attn = illu_fea_trans # illu_fea: b,c,h,w -> b,h,w,c
         q, k, v, illu_attn = map(lambda t: rearrange(t, 'b n (h d) -> b h n d', h=self.num_heads),
                                  (q_inp, k_inp, v_inp, illu_attn.flatten(1, 2)))
+        # print(q.shape) #torch.Size([1, 1, 240000, 36])
+
         v = v * illu_attn #cheng 16 36
+        # print(v.shape)#torch.Size([1, 1, 240000, 36])
         # q: b,heads,hw,c
         q = q.transpose(-2, -1)
+        # print(q.shape) #torch.Size([1, 1, 36, 240000])
         k = k.transpose(-2, -1)
         v = v.transpose(-2, -1)
         q = F.normalize(q, dim=-1, p=2)
@@ -898,7 +954,7 @@ class IGAB(nn.Module): #IGT的基本单元是IGAB，它由两层归一化（LN�
         self.blocks = nn.ModuleList([])
         for _ in range(num_blocks):
             self.blocks.append(nn.ModuleList([
-                IG_MSA(dim=dim, dim_head=dim_head, heads=heads), #注意力
+                IG_MSA(dim=dim, dim_head=dim_head, heads=heads),  # 注意力
                 PreNorm(dim, FeedForward(dim=dim))
             ]))
 
@@ -914,13 +970,50 @@ class IGAB(nn.Module): #IGT的基本单元是IGAB，它由两层归一化（LN�
             x = ff(x) + x
         out = x.permute(0, 3, 1, 2) #转回之前维度 二个维度 不懂
         return out
+#
+# class Illumination_Estimator(nn.Module):
+#     def __init__(self, n_fea_middle, n_fea_in=4, n_fea_out=3):
+#         super(Illumination_Estimator, self).__init__()
+#
+#         self.initial_conv = nn.Conv2d(n_fea_in, n_fea_middle, kernel_size=1, bias=True)
+#
+#         # 多尺度分支
+#         self.branch3x3 = nn.Conv2d(n_fea_middle, n_fea_middle, kernel_size=3, padding=1, bias=True, groups=n_fea_in)
+#         self.branch5x5 = nn.Conv2d(n_fea_middle, n_fea_middle, kernel_size=5, padding=2, bias=True, groups=n_fea_in)
+#         self.branch_dilated = nn.Conv2d(n_fea_middle, n_fea_middle, kernel_size=3, padding=3, dilation=3, bias=True, groups=n_fea_in)
+#         self.branch_pool = nn.Sequential(
+#             nn.AvgPool2d(kernel_size=3, stride=1, padding=1),
+#             nn.Conv2d(n_fea_middle, n_fea_middle, kernel_size=1, bias=True)
+#         )
+#
+#         self.fuse = nn.Conv2d(n_fea_middle * 4, n_fea_middle, kernel_size=1, bias=True)
+#         self.out_conv = nn.Conv2d(n_fea_middle, n_fea_out, kernel_size=1, bias=True)
+#
+#     def forward(self, img):
+#         # img: b,3,h,w
+#         mean_c = img.mean(dim=1, keepdim=True)
+#         x = torch.cat([img, mean_c], dim=1)  # b,4,h,w
+#
+#         x = self.initial_conv(x)
+#
+#         # 多尺度特征提取
+#         f1 = self.branch3x3(x)
+#         f2 = self.branch5x5(x)
+#         f3 = self.branch_dilated(x)
+#         f4 = self.branch_pool(x)
+#
+#         multi_scale_fea = torch.cat([f1, f2, f3, f4], dim=1)
+#         illu_fea = self.fuse(multi_scale_fea)
+#         illu_map = self.out_conv(illu_fea)
+#
+#         return illu_fea, illu_map
 
 class IAT(nn.Module):
     def __init__(self, in_dim=3, with_global=True, type='lol'):
         super(IAT, self).__init__()
         # self.local_net = Local_pred()
         # if self.training:
-        self.stage=3
+        self.stage=5
         self.n_feat = 36
         # else:
         #     self.stage=1
@@ -988,6 +1081,9 @@ class IAT(nn.Module):
             #
             #
             l1 = torch.clamp(torch.max(input_op, dim=1)[0].unsqueeze(1), min=0.0, max=1.0) #v空间
+#换成rgb空间，直接用平均值?
+            #v空间是最大值？
+            # l1 = input_op.mean(dim=1).unsqueeze(1)
 
 
             l2 = self.Light_relu_in(self.Light_conv_in(l1))
@@ -1050,8 +1146,8 @@ class IAT(nn.Module):
             # r2=input/illu_map
             illu_fea, illu_map = self.estimator(input)
             rimg=illu_map*input+input
-            att = self.calibrate(r)
-            # att = self.calibrate(r,illu_fea)
+            # att = self.calibrate(r)
+            att = self.calibrate(r,illu_fea)
             # r=input_op# st   delta = input - fea   return delta
             input_op = input+att
 
@@ -1166,7 +1262,6 @@ class IAT(nn.Module):
         loss3 = 0
         for i in range(self.stage):
             lossirt += self._criterion(in_list[i], i_list[i])
-
             loss2+=F.l1_loss(att_list[i],rimglist[i]+i_list[i])# 后面是st\
             loss3 += F.l1_loss(rimglist[i]+i_list[i],r_list[i]+i_list[i])
         return lossirt+2*loss2+2*loss3
@@ -1506,7 +1601,7 @@ class APBSN(nn.Module):
     Asymmetric PD Blind-Spot Network (AP-BSN)
     '''
 
-    def __init__(self, pd_a=5, pd_b=2, pd_pad=0, R3=True, R3_T=12, R3_p=0.16,
+    def __init__(self, pd_a=5, pd_b=2, pd_pad=0, R3=False, R3_T=12, R3_p=0.16,
                  bsn='DBSNl', in_ch=3, bsn_base_ch=128, bsn_num_module=9
 ):
         '''
@@ -1636,10 +1731,11 @@ class APBSN(nn.Module):
 #         # print(maskill.shape)#torch.Size([1, 1, 404, 604])
 #         # ==============xianshi==================
 #bsn==========================================================================
-        if pd is None: pd = self.pd_a
+        # if pd is None: pd = self.pd_a
         b,c,h,w=img.shape
         # maskill = (i >0.18).float()
         maskill = (i > i.mean()).float()
+        # print('maskill',maskill.shape)
         #保存=================================
         # illuimg = maskill.mul(255).byte()
         # illuimg=illuimg[0,:,:,:]
@@ -1657,13 +1753,17 @@ class APBSN(nn.Module):
         if h % pd != 0:
             img = F.pad(img, (0, 0, 0, pd - h % pd), mode='constant', value=0)
             maskill = F.pad(maskill, (0, 0, 0, pd - h % pd), mode='constant', value=0)
+            maskill1 = F.pad(maskill1, (0, 0, 0, pd - h % pd), mode='constant', value=0)
         if w % pd != 0:
             img = F.pad(img, (0, pd - w % pd, 0, 0), mode='constant', value=0)
             maskill = F.pad(maskill, (0, pd - w % pd, 0, 0), mode='constant', value=0)
+            maskill1 = F.pad(maskill1, (0, 0, 0, pd - h % pd), mode='constant', value=0)
         pd_img = util2.pixel_shuffle_down_sampling(img, f=pd, pad=self.pd_pad)
         maskill = util2.pixel_shuffle_down_sampling(maskill, f=pd, pad=self.pd_pad)
+        maskill1 = util2.pixel_shuffle_down_sampling(maskill1, f=pd, pad=self.pd_pad)
         pd_img, random2seq = util2.randomArrangement(pd_img, pd)
-
+        # print(pd_img.shape)
+        # print(maskill.shape)
 
         pd_img_denoised = self.bsn(pd_img, maskill)
 
@@ -1811,27 +1911,34 @@ class R2RNet(nn.Module):#总的
         # input_low = Variable(input_low, requires_grad=False)
         # Forward DecomNet
         ilist, rlist, inlist, attlist,rimg1,illu_map= self.DecomNet(input_low)
+        # # print(illu_map.shape) 1
+        # print(ilist[4].shape) # 1
         # ilist,rlist, inlist = self.DecomNet(input_low)
         # R_high, I_high = self.DecomNet(input_high) #干净图像
         # Forward DenoiseNet
-       #gaichengshuru
+       #gaichengshuru pd=5
         # denoise_R1, maskill = self.DenoiseNet(rlist[2]+ilist[2],illu_map,ilist[2], pd=5)
 
 
         # 三通道中像素最小值
 
-        self.out1 = attlist[0].detach().cpu()
-        # self.out1 = 0.7*inlist[2].detach().cpu() + 0.3*input_low.detach().cpu()
+        self.out1 = rlist[4].detach().cpu()+ilist[0].detach().cpu()
+
+        denoise_R2, maskill2 = self.DenoiseNet(rlist[4] + ilist[0], illu_map, ilist[0], pd=1)
+        self.out3 = denoise_R2.detach().cpu()
+
+        # self.out1 = 0.4*inlist[2].detach().cpu() + 0.6*input_low.detach().cpu()
         # self.out1 = 0.2 * rlist[2].detach().cpu() + 0.8 * input_low.detach().cpu()
         # self.out1 = attlist[2].detach().cpu()+input_low.detach().cpu()+ilist[2].detach().cpu()
-        # self.out1= rlist[2].detach().cpu()+ilist[2].detach().cpu()
-        denoise_R2, maskill2 = self.DenoiseNet(rlist[2]+ilist[2], illu_map, ilist[2], pd=1)
+        # self.out1= 1.2*rlist[2].detach().cpu()+ilist[2].detach().cpu()
+        # self.out1= rlist[0].detach().cpu()+ilist[0].detach().cpu()
+
+        # denoise_R2, maskill2 = self.DenoiseNet(rlist[2] +0.5*attlist[2], illu_map, ilist[2], pd=1)
         # denoise_R2, maskill2 = self.DenoiseNet(attlist[2]+input_low+ilist[2],illu_map, ilist[2],pd=1)
         # denoise_R2, maskill2 = self.DenoiseNet(0.2*rlist[2] + 0.8*input_low, illu_map, ilist[2], pd=1)
-        # denoise_R2, maskill2 = self.DenoiseNet(0.7 * inlist[2] + 0.3 * input_low, illu_map, ilist[2], pd=1)
+        # denoise_R2, maskill2 = self.DenoiseNet(0.4* inlist[2] + 0.6* input_low, illu_map, ilist[2], pd=1)
         # denoise_R1= rlist[2]
 
-        self.out3 = denoise_R2.detach().cpu()
         # self.out3 = 0.5*self.out3 +0.5* self.out1
         # self.out1=attlist[1].detach().cpu()
         # self.out1 =inlist[2].detach().cpu()
@@ -1893,17 +2000,15 @@ class R2RNet(nn.Module):#总的
         #                   0.1 * self.recon_loss_mutal_low + \
         #                   0.1 * self.recon_loss_mutal_high + \
         #                   0.1 * self.vgg_loss
-
+#改掉loss
         self.itrloss1=self.DecomNet.sciloss(input_low)
-
-
         self.loss_Decom =self.itrloss1
-
+    # 改掉loss
         # self.denoise_vgg = compute_vgg_loss(denoise_R, R_high).cuda() #干净
-        # DenoiseNet_loss
+        # DenoiseNet_loss 去噪损失
         # self.denoise_loss = F.l1_loss(denoise_R1, rlist[2]+ilist[2])
-
         # self.loss_Denoise = self.denoise_loss
+    # DenoiseNet_loss 去噪损失
         #
         # # RelightNet_loss
         # self.Relight_loss = F.l1_loss(denoise_R * I_delta_3, input_high).cuda() #干净 噪声乘光照
@@ -2039,14 +2144,20 @@ class R2RNet(nn.Module):#总的
                 # im_eval=np.array(im_eval, dtype='float32')
                 spsnr += psnr2(im_test, eval_high_img)
                 sssim += ssim2(im_test, eval_high_img)
-                # slpips +=lpips2(im_test, eval_high_img)
+                slpips +=lpips2(im_test, eval_high_img)
                 # sdists +=dists2(im_test, eval_high_img)
                 count+=count
             print('psnr=', spsnr / len(eval_low_data_names))
             print('ssim=', sssim / len(eval_low_data_names))
-            writer.add_scalar('runs/psnr,runs/ssim', spsnr / len(eval_low_data_names), sssim / len(eval_low_data_names), epoch_num)
+            print('lpips=', slpips / len(eval_low_data_names))
+            # writer.add_scalar('runs/psnr,runs/ssim,runs/lpips', spsnr / len(eval_low_data_names), sssim / len(eval_low_data_names), slpips / len(eval_low_data_names),epoch_num)
+            writer.add_scalars('runs/metrics', {
+                'psnr': spsnr / len(eval_low_data_names),
+                'ssim': sssim / len(eval_low_data_names),
+                'lpips': slpips / len(eval_low_data_names)
+            }, epoch_num)
 
-            self.logger.val('[%s] Done! PSNR : %.3f dB, SSIM : %.4f' % (epoch_num, spsnr / len(eval_low_data_names), sssim / len(eval_low_data_names)))
+            self.logger.val('[%s] Done! PSNR : %.3f dB, SSIM : %.4f, LPIPS : %.4f' % (epoch_num, spsnr / len(eval_low_data_names), sssim / len(eval_low_data_names),slpips / len(eval_low_data_names)))
 
     def save(self, iter_num, ckpt_dir):
         save_dir = ckpt_dir + '/' + self.train_phase + '/'
@@ -2256,12 +2367,25 @@ class R2RNet(nn.Module):#总的
         # psnr = PSNR()
         ssim1_list = []
         psnr1_list = []
+        lpips1_list = []
+        psnr1_value=0
+        ssim1_value = 0
+        lpips1_value = 0
+        psnr2_value = 0
+        ssim2_value = 0
+        lpips2_value = 0
+        count=0
+        # psnr1_list = []
         ssim2_list = []
         psnr2_list = []
+        lpips2_list = []
+        # psnr2_list = []
         # Predict for the test images
         for idx in range(len(test_low_data_names)):
+            count += 1
             test_img_path = test_low_data_names[idx]
             test_img_name = test_img_path.split('/')[-1]
+
             print('Processing ', test_img_name)
             test_low_img = Image.open(test_img_path)
             test_low_img = np.array(test_low_img, dtype="float32") / 255.0
@@ -2301,33 +2425,58 @@ class R2RNet(nn.Module):#总的
             # print('high',eval_                high_img.device)
             im11 = Image.fromarray(np.clip(cat1_image * 255.0, 0, 255.0).astype('uint8'))
             im_test1 = np.array(im11, dtype='float32')
-            ssim1_value = ssim2(im1, eval_high_img)
-            psnr1_value = psnr2(im_test1, eval_high_img)
-            print('The decomenet PSNR1 Value is:', psnr1_value)
-            print('The decomenet SSIM1 Value is:', ssim1_value)
+            # print(im_test1.shape)
+            # print(eval_high_img.shape)
+            score_ssim = ssim2(im_test1, eval_high_img)
+            score_psnr = psnr2(im_test1, eval_high_img)
+            score_lpips = lpips2(im_test1, eval_high_img)
+
+            ssim1_value += score_ssim
+            psnr1_value += score_psnr
+            lpips1_value += score_lpips
+            # print('单幅图增强的 PSNR1 Value is:', psnr1_value)
+            # print('单幅图增强的 SSIM1 Value is:', ssim1_value)
+            # print('单幅图增强的 lpips1 Value is:', lpips1_value)
             im2 = Image.fromarray(np.clip(cat2_image * 255.0, 0, 255.0).astype('uint8'))
             filepath = res_dir2 + '/' + test_img_name
             # im2.save(filepath[:-4] + 'deno' + '.jpg')
             im2.save(filepath[:-4] + 'deno' + '.png')
             # im2.save(filepath[:-4] + 'deno' + '.bmp')
-            im22 = Image.fromarray(np.clip(cat2_image * 255.0, 0, 255.0).astype('uint8'))
-            im_test2 = np.array(im22, dtype='float32')
-            ssim2_value = ssim2(im2, eval_high_img)
-            psnr2_value = psnr2(im_test2, eval_high_img)
-            print('The decomenet PSNR1 Value is:', psnr2_value)
-            print('The decomenet SSIM1 Value is:', ssim2_value)
+            # im22 = Image.fromarray(np.clip(cat2_image * 255.0, 0, 255.0).astype('uint8'))
+            im_test2 = np.array(im2, dtype='float32')
+            ssim2_value += ssim2(im_test2, eval_high_img)
+            psnr2_value += psnr2(im_test2, eval_high_img)
+            lpips2_value += lpips2(im_test2, eval_high_img)
+            # count+=count
+        print('psnr1=', psnr1_value / len(test_low_data_names))
+        print('ssim1=', ssim1_value / len(test_low_data_names))
+        print('lpips2=', lpips1_value / len(test_low_data_names))
+        # print('ssim2=', ssim2_value / len(test_low_data_names))
+        # print('psnr2=', psnr2_value / len(test_low_data_names))
+        # print('lpips2=', lpips2_value / len(test_low_data_names))
+        #
+        # ssim2_value = ssim2(im2, eval_high_img)
+        # psnr2_value = psnr2(im_test2, eval_high_img)
+        # lpips2_value = lpips2(im_test2, eval_high_img)
+        # print('单幅图去噪的 PSNR2 Value is:', psnr2_value)
+        # print('单幅图增强的 SSIM2 Value is:', ssim2_value)
+        # print('单幅图增强的 lpips2 Value is:', lpips2_value)
 
-            ssim1_list.append(ssim1_value)
-            psnr1_list.append(psnr1_value)
-            ssim2_list.append(ssim2_value)
-            psnr2_list.append(psnr2_value)
-        SSIM1_mean = np.mean(ssim1_list)
-        PSNR1_mean = np.mean(psnr1_list)
-        print('The decomenet SSIM1 Value is:', SSIM1_mean)
-        print('The decomenet PSNR1 Value is:', PSNR1_mean)
-
-        SSIM2_mean = np.mean(ssim2_list)
-        PSNR2_mean = np.mean(psnr2_list)
-        print('The denoisenet SSIM2 Value is:', SSIM2_mean)
-        print('The denoisenet PSNR2 Value is:', PSNR2_mean)
-
+        #     ssim1_list.append(ssim1_value)
+        #     lpips1_list.append(lpips1_value)
+        #     psnr1_list.append(psnr1_value)
+        #     ssim2_list.append(ssim2_value)
+        #     psnr2_list.append(psnr2_value)
+        #     lpips2_list.append(lpips2_value)
+        # SSIM1_mean = np.mean(ssim1_list)
+        # PSNR1_mean = np.mean(psnr1_list)
+        # lpips1_mean = np.mean(lpips1_list)
+        # print('照度总的 SSIM1 Value is:', SSIM1_mean)
+        # print('照度总的 PSNR1 Value is:', PSNR1_mean)
+        # print('照度总的 lpips1 Value is:', lpips1_mean)
+        # SSIM2_mean = np.mean(ssim2_list)
+        # PSNR2_mean = np.mean(psnr2_list)
+        # lpips2_mean = np.mean(lpips2_list)
+        # print('去噪总的 SSIM2 Value is:', SSIM2_mean)
+        # print('去噪总的 PSNR2 Value is:', PSNR2_mean)
+        # print('去噪总的 lpips2 Value is:', lpips2_mean)
