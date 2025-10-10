@@ -9,7 +9,7 @@ parser = argparse.ArgumentParser(description='')
 
 parser.add_argument('--gpu_id', dest='gpu_id', default="0",
                     help='GPU ID (-1 for CPU)')
-parser.add_argument('--epochs', dest='epochs', type=int, default=20,
+parser.add_argument('--epochs', dest='epochs', type=int, default=5,
                     help='number of total epochs')
 parser.add_argument('--batch_size', dest='batch_size', type=int, default=2,
                     help='number of samples in one batch')
